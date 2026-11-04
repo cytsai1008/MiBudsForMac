@@ -1,6 +1,7 @@
 import Combine
 import ServiceManagement
 import SwiftUI
+import UserNotifications
 
 @main
 struct MiBudsApp: App {
@@ -14,11 +15,16 @@ struct MiBudsApp: App {
 /// Menu bar icon: left-click opens the panel, right-click (or Control-click) opens the app menu.
 /// AppKit instead of MenuBarExtra, because MenuBarExtra cannot tell the two clicks apart.
 @MainActor
-final class StatusItem: NSObject, NSApplicationDelegate {
+final class StatusItem: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
+    private static let notifyKey = "notifyBatteryOnConnect"
     private var buds: Buds!
     private var item: NSStatusItem!
     private let popover = NSPopover()
     private var iconWatch: AnyCancellable?
+    private var readyWatch: AnyCancellable?
+    private var batteryWatch: AnyCancellable?
+    /// Set on each connect; cleared by the first battery report after it.
+    private var notifyPending = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         buds = Buds()
@@ -33,6 +39,13 @@ final class StatusItem: NSObject, NSApplicationDelegate {
         iconWatch = buds.$ready.sink { [weak self] ready in
             self?.item.button?.image = NSImage(systemSymbolName: ready ? "earbuds" : "earbuds.case", accessibilityDescription: "MiBuds")
         }
+        UNUserNotificationCenter.current().delegate = self
+        readyWatch = buds.$ready.removeDuplicates().sink { [weak self] ready in self?.notifyPending = ready }
+        // Debounce: one report sets left, right and case one after another.
+        batteryWatch = buds.$left.combineLatest(buds.$right, buds.$box)
+            .dropFirst()
+            .debounce(for: .seconds(1), scheduler: RunLoop.main)
+            .sink { [weak self] _ in self?.notifyBattery() }
     }
 
     @objc private func clicked() {
@@ -53,12 +66,38 @@ final class StatusItem: NSObject, NSApplicationDelegate {
         login.target = self
         login.state = SMAppService.mainApp.status == .enabled ? .on : .off
         menu.addItem(login)
+        let notify = NSMenuItem(title: "Notify Battery on Connect", action: #selector(toggleNotify), keyEquivalent: "")
+        notify.target = self
+        notify.state = UserDefaults.standard.bool(forKey: Self.notifyKey) ? .on : .off
+        menu.addItem(notify)
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Quit MiBuds", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         // Attach only for this click, so a left-click still opens the panel.
         item.menu = menu
         item.button?.performClick(nil)
         item.menu = nil
+    }
+
+    @objc private func toggleNotify() {
+        let on = !UserDefaults.standard.bool(forKey: Self.notifyKey)
+        UserDefaults.standard.set(on, forKey: Self.notifyKey)
+        if on { UNUserNotificationCenter.current().requestAuthorization(options: [.alert]) { _, _ in } }
+    }
+
+    private func notifyBattery() {
+        guard notifyPending, buds.ready else { return }
+        notifyPending = false
+        guard UserDefaults.standard.bool(forKey: Self.notifyKey) else { return }
+        func pct(_ b: Battery?) -> String { b.map { "\($0.percent)%" } ?? "–" }
+        let content = UNMutableNotificationContent()
+        content.title = buds.deviceName ?? "Earbuds"
+        content.body = "L \(pct(buds.left))  ·  R \(pct(buds.right))  ·  Case \(pct(buds.box))"
+        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "battery", content: content, trigger: nil))
+    }
+
+    // Show the banner even while the panel is open.
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
+        [.banner]
     }
 
     @objc private func toggleOpenAtLogin() {
