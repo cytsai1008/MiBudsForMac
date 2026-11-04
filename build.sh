@@ -12,8 +12,9 @@ fi
 
 APP=build/MiBuds.app
 rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp Info.plist "$APP/Contents/"
+cp AppIcon.icns "$APP/Contents/Resources/"
 for arch in arm64 x86_64; do
     swiftc -O -parse-as-library -target $arch-apple-macos13 -o build/MiBuds-$arch Sources/*.swift
 done
