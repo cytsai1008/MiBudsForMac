@@ -20,6 +20,22 @@ This project has no connection to Xiaomi. It works with the earbuds' Bluetooth p
 
 ## Install
 
+### Homebrew
+
+```sh
+brew install --cask cytsai1008/tap/mibuds-for-mac
+```
+
+Homebrew installs `MiBuds.app` in `/Applications`. The app does not have an Apple Developer ID signature, so before the first launch, run:
+
+```sh
+xattr -dr com.apple.quarantine /Applications/MiBuds.app
+```
+
+To update, run `brew upgrade --cask mibuds-for-mac`.
+
+### Manual
+
 1. Download `MiBuds.zip` from [Releases](../../releases) and unzip it.
 2. Move `MiBuds.app` to `/Applications` or `~/Applications`.
 3. Open the app. The app does not have an Apple Developer ID signature, so macOS blocks it the first time. To open it, right-click the app, select **Open**, then select **Open** again. You can also run this command one time:
