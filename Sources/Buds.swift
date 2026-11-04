@@ -10,6 +10,8 @@ final class Buds: NSObject, ObservableObject, LinkOwner {
     @Published var left: Battery?
     @Published var right: Battery?
     @Published var box: Battery?
+    /// The buds send no case level while both are out of the case; then `box` is the last known level.
+    @Published var boxIsOld = false
     @Published var anc: ANCMode?
     @Published var ancLevel: UInt8?
     @Published var vendorID: UInt16?
@@ -28,37 +30,57 @@ final class Buds: NSObject, ObservableObject, LinkOwner {
     private var challenge: [UInt8] = []
     private var rawStage = 0
     private var pollTimer: Timer?
-    /// Set by Disconnect so the timer does not reconnect on its own.
-    private var userDisconnected = false
+    private var disconnectNote: IOBluetoothUserNotification?
 
     override init() {
         super.init()
-        connect()
-        // Refresh battery, and reconnect when the buds come back.
+        // macOS owns the Bluetooth connection; we attach when it connects the buds.
+        IOBluetoothDevice.register(forConnectNotifications: self, selector: #selector(deviceConnected(_:device:)))
+        attach()
+        // Refresh battery, and retry if the channel dropped while the buds stay connected.
         pollTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.tick() }
+            Task { @MainActor in self?.ready == true ? self?.requestStatus() : self?.retry() }
         }
     }
 
-    private func tick() {
-        guard !ready else { return requestStatus() }
-        guard !userDisconnected else { return }
-        // Not connected yet (or stuck scanning LE): start over, preferring classic.
-        link?.close()
-        link = nil
-        connect()
+    @objc private func deviceConnected(_ note: IOBluetoothUserNotification, device: IOBluetoothDevice) {
+        guard Self.looksLikeBuds(device.name) else { return }
+        // Right after connecting, the buds refuse the serial channel for a moment (error 911).
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in self?.attach() }
     }
 
-    func connect() {
-        userDisconnected = false
+    @objc private func deviceDisconnected(_ note: IOBluetoothUserNotification, device: IOBluetoothDevice) {
+        note.unregister()
+        disconnectNote = nil
+        link?.close()
+        reset("Not connected")
+        box = nil
+        boxIsOld = false
+    }
+
+    private func retry() {
+        link?.close()
+        reset("Not connected")
+        attach()
+    }
+
+    /// Open our channel on buds that macOS has already connected.
+    private func attach() {
         guard link == nil else { return }
         let paired = (IOBluetoothDevice.pairedDevices() as? [IOBluetoothDevice]) ?? []
-        if let dev = paired.first(where: { $0.isConnected() && Self.looksLikeBuds($0.name) }) {
-            deviceName = dev.name
-            status = "Looking for service…"
-            link = RfcommLink(device: dev, owner: self)
-        } else {
-            startBle()
+        guard let dev = paired.first(where: { $0.isConnected() && Self.looksLikeBuds($0.name) }) else {
+            status = "Not connected"
+            return
+        }
+        deviceName = dev.name
+        status = "Looking for service…"
+        disconnectNote?.unregister()
+        disconnectNote = dev.register(forDisconnectNotification: self, selector: #selector(deviceDisconnected(_:device:)))
+        let l = RfcommLink(device: dev, owner: self)
+        link = l
+        // IOBluetooth can fail the open (error 911) without any callback, so try again.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 8) { [weak self] in
+            if let self, self.link === l, !self.ready { self.retry() }
         }
     }
 
@@ -70,12 +92,6 @@ final class Buds: NSObject, ObservableObject, LinkOwner {
     static func looksLikeBuds(_ name: String?) -> Bool {
         guard let n = name?.lowercased() else { return false }
         return n.contains("buds") || n.contains("xiaomi") || n.contains("redmi")
-    }
-
-    func disconnect() {
-        userDisconnected = true
-        link?.close()
-        reset("Not connected")
     }
 
     private func reset(_ msg: String) {
@@ -216,7 +232,15 @@ final class Buds: NSObject, ObservableObject, LinkOwner {
         let list = b.map(Battery.init(byte:))
         if list.count > 0 { left = list[0] }
         if list.count > 1 { right = list[1] }
-        if list.count > 2 { box = list[2] }
+        if list.count > 2 {
+            if let c = list[2] {
+                box = c
+                boxIsOld = false
+            } else if box != nil {
+                box?.charging = false
+                boxIsOld = true
+            }
+        }
     }
 
     private func send(_ op: UInt8, _ params: [UInt8]) {

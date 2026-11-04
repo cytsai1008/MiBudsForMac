@@ -88,7 +88,7 @@ struct Menu: View {
             if buds.ready {
                 HStack(spacing: 16) {
                     BatteryView(label: "L", battery: buds.left)
-                    BatteryView(label: "Case", battery: buds.box)
+                    BatteryView(label: "Case", battery: buds.box, old: buds.boxIsOld)
                     BatteryView(label: "R", battery: buds.right)
                 }
 
@@ -122,9 +122,6 @@ struct Menu: View {
             HStack {
                 if buds.ready {
                     Button("Refresh") { buds.requestStatus() }
-                    Button("Disconnect") { buds.disconnect() }
-                } else {
-                    Button("Connect") { buds.connect() }
                 }
                 Spacer()
                 Button("Quit") { NSApp.terminate(nil) }
@@ -138,10 +135,14 @@ struct Menu: View {
 struct BatteryView: View {
     let label: String
     let battery: Battery?
+    /// Last known level, not a live reading.
+    var old = false
 
     var body: some View {
         VStack(spacing: 2) {
-            Text(battery.map { "\($0.percent)%" } ?? "–").font(.title3.monospacedDigit())
+            Text(battery.map { "\($0.percent)%" } ?? "–")
+                .font(.title3.monospacedDigit())
+                .foregroundStyle(old ? .secondary : .primary)
             HStack(spacing: 2) {
                 if battery?.charging == true { Image(systemName: "bolt.fill").foregroundStyle(.green) }
                 Text(label)
@@ -150,6 +151,8 @@ struct BatteryView: View {
             .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity)
+        .help(old ? "Last known level. The case reports no level while both earbuds are out." : "")
         .accessibilityElement(children: .combine)
+        .accessibilityValue(old ? "Last known level" : "")
     }
 }

@@ -51,7 +51,7 @@ To update, run `brew upgrade --cask mibuds-for-mac`.
 - **Left-click** the earbuds icon in the menu bar to open the panel. The panel shows battery and noise control.
 - **Right-click**, or Control-click, the icon to open the menu. It has **Open at Login** and **Quit MiBuds**.
 
-The app connects to the first connected Bluetooth device with "buds", "redmi" or "xiaomi" in its name. It refreshes the battery level every 60 seconds. When you change a setting on the earbuds, for example with a tap, the app updates at once.
+macOS manages the Bluetooth connection. When macOS connects a device with "buds", "redmi" or "xiaomi" in its name, the app opens its channel to it. When macOS disconnects the earbuds, the app shows "Not connected". The app refreshes the battery level every 60 seconds. When you change a setting on the earbuds, for example with a tap, the app updates at once.
 
 ## Build from source
 
