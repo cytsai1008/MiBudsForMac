@@ -1,0 +1,10 @@
+# Build output (app, zip, self-test, server snapshot)
+build/
+
+# Xiaomi app package used for reverse engineering. Not ours to redistribute.
+*.apk
+
+# Local Claude Code state
+.claude/
+
+.DS_Store
